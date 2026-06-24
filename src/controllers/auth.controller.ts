@@ -2,6 +2,7 @@ import { type Request, type Response } from 'express';
 import bcrypt from 'bcrypt';
 import { dbRun, dbQueryGet } from '../db/connection.js';
 import { enviarCorreoVerificacion } from '../services/mail.service.js'; 
+import crypto from 'crypto';
 
 // 1. CONTROLADOR DE REGISTRO (Actualizado con envío de Mail)
 export const registrarUsuario = async (req: Request, res: Response): Promise<void> => {
@@ -93,5 +94,70 @@ export const verificarCuenta = async (req: Request, res: Response): Promise<void
   } catch (error) {
     console.error('❌ Error al verificar cuenta:', error);
     res.status(500).json({ error: 'Error interno al procesar la verificación.' });
+  }
+};
+// 3. CONTROLADOR DE LOGIN CON SESIÓN OPACA (REEMPLAZO DE JWT)
+export const loginUsuario = async (req: Request, res: Response): Promise<void> => {
+  const { email, password } = req.body;
+
+  // Validaciones básicas de entrada
+  if (!email || !password) {
+    res.status(400).json({ error: 'El email y la contraseña son obligatorios.' });
+    return;
+  }
+
+  try {
+    // 1. Buscar al usuario en la base de datos
+    const usuario = await dbQueryGet(
+      'SELECT id, nombre, email, password_hash, verificado FROM usuarios WHERE email = ?',
+      [email]
+    );
+
+    if (!usuario) {
+      res.status(401).json({ error: 'Credenciales inválidas.' });
+      return;
+    }
+
+    // 2. Verificar estrictamente que la cuenta esté validada por correo
+    if (usuario.verificado === 0) {
+      res.status(403).json({ error: 'Por favor, verifique su correo electrónico antes de iniciar sesión.' });
+      return;
+    }
+
+    // 3. Comparar las contraseñas con bcrypt
+    const passwordCorrecto = await bcrypt.compare(password, usuario.password_hash);
+    if (!passwordCorrecto) {
+      res.status(401).json({ error: 'Credenciales inválidas.' });
+      return;
+    }
+
+    // 4. Generar un Token de Sesión Único y Opaco (UUID v4)
+    const tokenSesion = crypto.randomUUID();
+
+    // 5. Definir la expiración de la sesión (ejemplo: 24 horas a partir de ahora)
+    const fechaExpiracion = new Date();
+    fechaExpiracion.setHours(fechaExpiracion.getHours() + 24);
+    const fechaExpiracionISO = fechaExpiracion.toISOString();
+
+    // 6. Guardar la sesión activa en la tabla de SQLite
+    await dbRun(
+      'INSERT INTO sesiones (id, usuario_id, fecha_expiracion) VALUES (?, ?, ?)',
+      [tokenSesion, usuario.id, fechaExpiracionISO]
+    );
+
+    // 7. Responder con el token de sesión y datos básicos del usuario
+    res.status(200).json({
+      message: 'Inicio de sesión exitoso.',
+      token: tokenSesion, // Este token lo viajará el Frontend en los headers de las próximas peticiones
+      usuario: {
+        id: usuario.id,
+        nombre: usuario.nombre,
+        email: usuario.email
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Error en el login de usuario:', error);
+    res.status(500).json({ error: 'Ocurrió un error interno en el servidor.' });
   }
 };
