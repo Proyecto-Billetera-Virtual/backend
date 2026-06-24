@@ -1,6 +1,7 @@
 import express from 'express';
 import dotenv from 'dotenv';
 import authRoutes from './routes/auth.routes.js';
+import cuentaRoutes from './routes/cuenta.routes.js';
 
 dotenv.config();
 
@@ -12,6 +13,7 @@ app.use(express.json());
 
 // Enlazar las rutas de autenticación
 app.use('/api/auth', authRoutes);
+app.use('/api/cuenta', cuentaRoutes);
 
 app.get('/health', (req, res) => {
   res.json({ status: 'Backend online', timestamp: new Date() });
