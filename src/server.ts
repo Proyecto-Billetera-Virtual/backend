@@ -1,16 +1,18 @@
 import express from 'express';
 import dotenv from 'dotenv';
+import authRoutes from './routes/auth.routes.js';
 
-// Configurar dotenv para leer las variables del .env
 dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// Middleware para parsear JSON en el body
+// Middleware indispensable para procesar los JSON que te mande el Proxy/Frontend
 app.use(express.json());
 
-// Ruta de prueba
+// Enlazar las rutas de autenticación
+app.use('/api/auth', authRoutes);
+
 app.get('/health', (req, res) => {
   res.json({ status: 'Backend online', timestamp: new Date() });
 });
