@@ -180,3 +180,118 @@ export const retirarFondos = async (req: Request, res: Response): Promise<void> 
     }
   }
 };
+export const transferirFondos = async (req: Request, res: Response): Promise<void> => {
+  const emisorId = req.usuarioId; // ID del que transfiere (obtenido del token)
+  const { emailDestino, moneda, monto } = req.body;
+
+  // 1. Validaciones básicas de entrada
+  if (!emailDestino || !moneda || monto === undefined) {
+    res.status(400).json({ error: 'El email de destino, la moneda y el monto son obligatorios.' });
+    return;
+  }
+
+  if (moneda !== 'ARS' && moneda !== 'USD') {
+    res.status(400).json({ error: 'Moneda no soportada. Solo se permite ARS o USD.' });
+    return;
+  }
+
+  if (typeof monto !== 'number' || monto <= 0) {
+    res.status(400).json({ error: 'El monto debe ser un número mayor a cero.' });
+    return;
+  }
+
+  try {
+    // 2. Buscar al usuario receptor por su email
+    const receptor = await dbQueryGet(
+      'SELECT id FROM usuarios WHERE email = ?',
+      [emailDestino]
+    );
+
+    if (!receptor) {
+      res.status(404).json({ error: 'El usuario destino no está registrado en la plataforma.' });
+      return;
+    }
+
+    const receptorId = receptor.id;
+
+    // Control de seguridad: Evitar transferirse a uno mismo
+    if (emisorId === receptorId) {
+      res.status(400).json({ error: 'No puedes transferirte dinero a ti mismo.' });
+      return;
+    }
+
+    // 3. Obtener y verificar el saldo de la cuenta del emisor
+    const cuentaEmisor = await dbQueryGet(
+      'SELECT saldo FROM cuentas WHERE usuario_id = ? AND moneda = ?',
+      [emisorId, moneda]
+    );
+
+    if (!cuentaEmisor || cuentaEmisor.saldo < monto) {
+      res.status(400).json({ 
+        error: 'Saldo insuficiente para realizar la transferencia.',
+        saldo_disponible: cuentaEmisor ? cuentaEmisor.saldo : 0
+      });
+      return;
+    }
+
+    // 4. Obtener la cuenta del receptor para calcular su nuevo saldo
+    const cuentaReceptor = await dbQueryGet(
+      'SELECT saldo FROM cuentas WHERE usuario_id = ? AND moneda = ?',
+      [receptorId, moneda]
+    );
+
+    if (!cuentaReceptor) {
+      res.status(404).json({ error: `El destinatario no tiene habilitada una billetera en ${moneda}.` });
+      return;
+    }
+
+    // Calcular nuevos saldos flotantes
+    const nuevoSaldoEmisor = cuentaEmisor.saldo - monto;
+    const nuevoSaldoReceptor = cuentaReceptor.saldo + monto;
+
+    // operacion en la db
+    await dbRun('BEGIN TRANSACTION;');
+
+    try {
+      // A) Debitar del emisor
+      await dbRun(
+        'UPDATE cuentas SET saldo = ? WHERE usuario_id = ? AND moneda = ?',
+        [nuevoSaldoEmisor, emisorId, moneda]
+      );
+
+      // B) Acreditar al receptor
+      await dbRun(
+        'UPDATE cuentas SET saldo = ? WHERE usuario_id = ? AND moneda = ?',
+        [nuevoSaldoReceptor, receptorId, moneda]
+      );
+
+      // Guardar cambios definitivos
+      await dbRun('COMMIT;');
+
+    } catch (transactionError) {
+      try {
+        await dbRun('ROLLBACK;');
+      } catch (rollbackErr) {
+        console.error('⚠️ Error crítico al deshacer transferencia (ROLLBACK):', rollbackErr);
+      }
+      throw transactionError;
+    }
+
+    // 6. Respuesta única de éxito
+    res.status(200).json({
+      message: 'Transferencia realizada con éxito.',
+      comprobante: {
+        moneda,
+        monto_transferido: monto,
+        destinatario: emailDestino,
+        tu_nuevo_saldo: nuevoSaldoEmisor
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Error al procesar transferencia P2P:', error);
+    if (!res.headersSent) {
+      res.status(500).json({ error: 'Ocurrió un error interno al procesar la transferencia.' });
+    }
+  }
+};
