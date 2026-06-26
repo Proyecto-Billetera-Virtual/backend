@@ -100,3 +100,83 @@ export const ingresarFondos = async (req: Request, res: Response): Promise<void>
     }
   }
 };
+export const retirarFondos = async (req: Request, res: Response): Promise<void> => {
+  const usuarioId = req.usuarioId; // Servido por el middleware de sesión
+  const { moneda, monto } = req.body;
+
+  // 1. Validaciones básicas de entrada
+  if (!moneda || monto === undefined) {
+    res.status(400).json({ error: 'La moneda (ARS/USD) y el monto son obligatorios.' });
+    return;
+  }
+
+  if (moneda !== 'ARS' && moneda !== 'USD') {
+    res.status(400).json({ error: 'Moneda no soportada. Solo se permite ARS o USD.' });
+    return;
+  }
+
+  if (typeof monto !== 'number' || monto <= 0) {
+    res.status(400).json({ error: 'El monto debe ser un número mayor a cero.' });
+    return;
+  }
+
+  try {
+    // 2. Obtener la cuenta para verificar el saldo actual
+    const cuenta = await dbQueryGet(
+      'SELECT id, saldo FROM cuentas WHERE usuario_id = ? AND moneda = ?',
+      [usuarioId, moneda]
+    );
+
+    if (!cuenta) {
+      res.status(404).json({ error: `No se encontró una billetera en ${moneda} para este usuario.` });
+      return;
+    }
+
+    //  Validar fondos suficientes
+    if (cuenta.saldo < monto) {
+      res.status(400).json({ 
+        error: 'Saldo insuficiente para realizar esta operación.',
+        saldo_actual: cuenta.saldo,
+        monto_solicitado: monto
+      });
+      return;
+    }
+
+    const nuevoSaldo = cuenta.saldo - monto;
+
+    // 3. Iniciar transacción segura
+    await dbRun('BEGIN TRANSACTION;');
+
+    try {
+      // 4. Actualizar restando el saldo en la tabla 'cuentas'
+      await dbRun(
+        'UPDATE cuentas SET saldo = ? WHERE usuario_id = ? AND moneda = ?',
+        [nuevoSaldo, usuarioId, moneda]
+      );
+
+      await dbRun('COMMIT;');
+
+    } catch (transactionError) {
+      try {
+        await dbRun('ROLLBACK;');
+      } catch (rollbackErr) {
+        console.error('⚠️ No se pudo ejecutar el ROLLBACK de retiro:', rollbackErr);
+      }
+      throw transactionError;
+    }
+
+    // 5. Respuesta única de éxito
+    res.status(200).json({
+      message: `Retiro de ${moneda} exitoso.`,
+      moneda,
+      monto_retirado: monto,
+      nuevo_saldo: nuevoSaldo
+    });
+
+  } catch (error) {
+    console.error('❌ Error al retirar fondos:', error);
+    if (!res.headersSent) {
+      res.status(500).json({ error: 'Ocurrió un error interno al procesar el retiro.' });
+    }
+  }
+};
