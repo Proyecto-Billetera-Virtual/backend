@@ -6,6 +6,7 @@ import cuentaRoutes from './routes/cuenta.routes.js';
 dotenv.config();
 
 const app = express();
+const HOST = process.env.HOST || '192.168.220.130';
 const PORT = process.env.PORT || 5000;
 
 // Middleware indispensable para procesar los JSON que te mande el Proxy/Frontend
@@ -20,5 +21,5 @@ app.get('/health', (req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`🚀 Servidor TypeScript corriendo en http://localhost:${PORT}`);
+  console.log(`🚀 Servidor TypeScript corriendo en http://${HOST}:${PORT}`);
 });

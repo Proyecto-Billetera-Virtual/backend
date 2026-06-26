@@ -1,6 +1,13 @@
 import { type Request, type Response } from 'express';
-import { db, dbRun, dbQueryGet } from '../db/connection.js';
-
+import { db, dbRun, dbQueryGet,  } from '../db/connection.js';
+export const dbQueryAll = (sql: string, params: any[] = []): Promise<any[]> => {
+  return new Promise((resolve, reject) => {
+    db.all(sql, params, (err, rows) => {
+      if (err) reject(err);
+      else resolve(rows);
+    });
+  });
+};
 export const obtenerSaldos = (req: Request, res: Response): void => {
   const usuarioId = req.usuarioId; // Obtenido de forma segura desde el middleware
 
@@ -69,7 +76,16 @@ export const ingresarFondos = async (req: Request, res: Response): Promise<void>
         'UPDATE cuentas SET saldo = ? WHERE usuario_id = ? AND moneda = ?',
         [nuevoSaldo, usuarioId, moneda]
       );
-
+      await dbRun(
+        `INSERT INTO movimientos (cuenta_id, tipo, monto, detalle, fecha) 
+         VALUES (?, 'INGRESO', ?, ?, ?)`,
+        [
+          cuenta.id,                       // ID de la billetera afectada
+          monto,                           // Cuánta plata entró
+          `Depósito de ${moneda} ${monto}`, // Detalle amigable para el usuario
+          Date.now()                       // Timestamp numérico actual
+        ]
+      );
       // Confirmar los cambios en SQLite
       await dbRun('COMMIT;');
 
@@ -293,5 +309,30 @@ export const transferirFondos = async (req: Request, res: Response): Promise<voi
     if (!res.headersSent) {
       res.status(500).json({ error: 'Ocurrió un error interno al procesar la transferencia.' });
     }
+  }
+};
+export const obtenerMovimientos = async (req: Request, res: Response): Promise<void> => {
+  const usuarioId = req.usuarioId;
+
+  try {
+    // Traemos todos los movimientos de las cuentas (ARS y USD) que le pertenecen a este usuario
+    const movimientos = await dbQueryAll(
+      `SELECT m.id, c.moneda, m.tipo, m.monto, m.detalle, m.fecha 
+       FROM movimientos m
+       JOIN cuentas c ON m.cuenta_id = c.id
+       WHERE c.usuario_id = ?
+       ORDER BY m.fecha DESC`,
+      [usuarioId]
+    );
+
+  // NOTA: Si no tenés 'dbQueryAll' definido en connection.ts, abajo te dejo cómo armarlo rápido.
+
+    res.status(200).json({
+      historial: movimientos
+    });
+
+  } catch (error) {
+    console.error('❌ Error al obtener el historial:', error);
+    res.status(500).json({ error: 'Ocurrió un error interno al consultar el historial.' });
   }
 };

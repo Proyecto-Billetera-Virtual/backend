@@ -11,7 +11,25 @@ export const db = new sqlite3.Database(path.resolve(dbPath), (err) => {
     console.error('❌ Error al conectar a SQLite:', err.message);
   }
 });
-
+db.serialize(() => {
+  db.run(`
+    CREATE TABLE IF NOT EXISTS movimientos (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      cuenta_id INTEGER NOT NULL,
+      tipo TEXT NOT NULL,
+      monto REAL NOT NULL,
+      detalle TEXT,
+      fecha INTEGER NOT NULL,
+      FOREIGN KEY(cuenta_id) REFERENCES cuentas(id)
+    );
+  `, (err) => {
+    if (err) {
+      console.error('❌ Error al crear la tabla movimientos:', err.message);
+    } else {
+      console.log('✅ Tabla "movimientos" verificada/creada con éxito.');
+    }
+  });
+});
 // Helpers para usar async/await con el driver nativo de sqlite3
 export const dbQueryGet = (sql: string, params: any[] = []): Promise<any> => {
   return new Promise((resolve, reject) => {
