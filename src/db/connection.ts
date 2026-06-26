@@ -22,11 +22,18 @@ export const dbQueryGet = (sql: string, params: any[] = []): Promise<any> => {
   });
 };
 
+//  salvaguarda por si 'this' es undefined en comandos de control (BEGIN, COMMIT)
 export const dbRun = function (sql: string, params: any[] = []): Promise<{ lastID: number; changes: number }> {
   return new Promise((resolve, reject) => {
     db.run(sql, params, function (err) {
-      if (err) reject(err);
-      else resolve({ lastID: this.lastID, changes: this.changes });
+      if (err) {
+        reject(err);
+      } else {
+        // Si 'this' existe (en INSERTs/UPDATEs), pasamos los datos. Si no (en transacciones), devolvemos 0 de forma segura.
+        const lastID = this ? this.lastID : 0;
+        const changes = this ? this.changes : 0;
+        resolve({ lastID, changes });
+      }
     });
   });
 };
