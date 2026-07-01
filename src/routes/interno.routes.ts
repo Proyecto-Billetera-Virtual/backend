@@ -6,20 +6,23 @@ const router = Router();
 
 // 1. GET /interno/saldo/:usuario_id
 router.get('/interno/saldo/:usuario_id', async (req: Request, res: Response): Promise<void> => {
-  const { usuario_id } = req.params;
+  // 1. Forzamos a que sea un string plano pasándolo por String() o asegurando el tipo
+  const usuarioIdParam = req.params.usuario_id;
 
-  // 🚨 REGLA 1: Validación estricta contra datos basura ("undefined", vacíos o No-Numbers)
+  // 🚨 REGLA 1: Validación estricta garantizando que trabajamos con un String limpio
   if (
-    !usuario_id || 
-    usuario_id.trim() === '' || 
-    usuario_id.toLowerCase() === 'undefined' || 
-    isNaN(Number(usuario_id))
+    !usuarioIdParam || 
+    typeof usuarioIdParam !== 'string' ||
+    usuarioIdParam.trim() === '' || 
+    usuarioIdParam.toLowerCase() === 'undefined' || 
+    isNaN(Number(usuarioIdParam))
   ) {
     res.status(400).json({ error: "ID de usuario inválido o no provisto" });
     return;
   }
 
-  const userIdNumerico = Number(usuario_id);
+  // 2. Ahora que es seguro, lo convertimos a número para SQLite
+  const userIdNumerico = Number(usuarioIdParam);
 
   try {
     // Ejecutamos un COUNT junto con los SUM para saber si el usuario realmente existe en la DB
