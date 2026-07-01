@@ -11,7 +11,7 @@ import { requerirSesion } from '../middlewares/auth.middleware.js';
 const router = Router();
 
 router.get('/saldo', requerirSesion, obtenerSaldos);
-router.post('/ingresar', requerirSesion, ingresarFondos);
+router.post('/ingreso', requerirSesion, ingresarFondos);
 router.post('/retirar', requerirSesion, retirarFondos);
 router.post('/transferir', requerirSesion, transferirFondos);
 
