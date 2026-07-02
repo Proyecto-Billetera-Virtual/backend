@@ -1,10 +1,13 @@
 import { type Request, type Response } from 'express';
 import bcrypt from 'bcrypt';
 import { dbRun, dbQueryGet } from '../db/connection.js';
-import { enviarCorreoVerificacion } from '../services/mail.service.js'; 
+import { enviarCorreoVerificacion, enviarCorreoRecuperacion } from '../services/mail.service.js';
 import crypto from 'crypto';
 
-// 1. CONTROLADOR DE REGISTRO (Actualizado con envío de Mail)
+function generarCodigo6Digitos(): string {
+  return Math.floor(100000 + Math.random() * 900000).toString();
+}
+
 export const registrarUsuario = async (req: Request, res: Response): Promise<void> => {
   const { nombre, email, password } = req.body;
 
@@ -16,7 +19,7 @@ export const registrarUsuario = async (req: Request, res: Response): Promise<voi
   try {
     const usuarioExistente = await dbQueryGet('SELECT id FROM usuarios WHERE email = ?', [email]);
     if (usuarioExistente) {
-      res.status(400).json({ error: 'El correo electrónico ya se encuentra registrado.' });
+      res.status(400).json({ error: 'El correo electronico ya se encuentra registrado.' });
       return;
     }
 
@@ -30,7 +33,7 @@ export const registrarUsuario = async (req: Request, res: Response): Promise<voi
         'INSERT INTO usuarios (nombre, email, password_hash, verificado) VALUES (?, ?, ?, 0)',
         [nombre, email, passwordHash]
       );
-      
+
       const nuevoUsuarioId = resultadoUsuario.lastID;
 
       await dbRun('INSERT INTO cuentas (usuario_id, moneda, saldo) VALUES (?, "ARS", 0.0)', [nuevoUsuarioId]);
@@ -38,13 +41,25 @@ export const registrarUsuario = async (req: Request, res: Response): Promise<voi
 
       await dbRun('COMMIT;');
 
-      // DISPARAR EL CORREO ELECTRÓNICO (Fuera de la transacción de la BD)
-      // Se hace de forma asíncrona pero sin trabar la respuesta, o con un await controlado
-      await enviarCorreoVerificacion(email, nombre, nuevoUsuarioId);
+      const codigo = generarCodigo6Digitos();
+      const expiracion = new Date();
+      expiracion.setHours(expiracion.getHours() + 1);
+
+      await dbRun(
+        'INSERT INTO codigos_verificacion (email, codigo, expiracion, usado) VALUES (?, ?, ?, 0)',
+        [email, codigo, expiracion.toISOString()]
+      );
+
+      console.log('========================================');
+      console.log(`CODIGO DE VERIFICACION para ${email}: ${codigo}`);
+      console.log('========================================');
+
+      await enviarCorreoVerificacion(email, nombre, codigo);
 
       res.status(201).json({
-        message: 'Usuario registrado con éxito. Se ha enviado un correo de verificación a su casilla.',
-        usuarioId: nuevoUsuarioId
+        message: 'Usuario registrado con exito. Se ha enviado un codigo de verificacion a su correo.',
+        usuarioId: nuevoUsuarioId,
+        email: email
       });
 
     } catch (transactionError) {
@@ -53,102 +68,157 @@ export const registrarUsuario = async (req: Request, res: Response): Promise<voi
     }
 
   } catch (error) {
-    console.error('❌ Error en el registro de usuario:', error);
-    res.status(500).json({ error: 'Ocurrió un error interno en el servidor.' });
+    console.error('Error en el registro de usuario:', error);
+    res.status(500).json({ error: 'Ocurrio un error interno en el servidor.' });
   }
 };
 
-// 2. NUEVO CONTROLADOR DE VERIFICACIÓN (Cambia verificado a 1)
-export const verificarCuenta = async (req: Request, res: Response): Promise<void> => {
-  const usuarioId = req.query.id;
+export const verificarConCodigo = async (req: Request, res: Response): Promise<void> => {
+  const { email, codigo } = req.body;
 
-  if (!usuarioId) {
-    res.status(400).json({ error: 'Falta el identificador de usuario para la verificación.' });
+  if (!email || !codigo) {
+    res.status(400).json({ error: 'Email y codigo son obligatorios.' });
     return;
   }
 
   try {
-    // Verificar si el usuario existe
-    const usuario = await dbQueryGet('SELECT id, verificado FROM usuarios WHERE id = ?', [usuarioId]);
-    
+    const usuario = await dbQueryGet('SELECT id, verificado FROM usuarios WHERE email = ?', [email]);
+
     if (!usuario) {
       res.status(404).json({ error: 'Usuario no encontrado.' });
       return;
     }
 
     if (usuario.verificado === 1) {
-      res.status(400).json({ message: 'Esta cuenta ya ha sido verificada previamente.' });
+      res.status(400).json({ error: 'Esta cuenta ya ha sido verificada.' });
       return;
     }
 
-    // Cambiar estado a verificado (1)
-    await dbRun('UPDATE usuarios SET verificado = 1 WHERE id = ?', [usuarioId]);
+    const registro = await dbQueryGet(
+      'SELECT id, expiracion FROM codigos_verificacion WHERE email = ? AND codigo = ? AND usado = 0 ORDER BY id DESC LIMIT 1',
+      [email, codigo]
+    );
 
-    res.status(200).send(`
-      <div style="font-family: Arial, sans-serif; text-align: center; margin-top: 50px;">
-        <h1 style="color: #4CAF50;">¡Cuenta activada con éxito!</h1>
-        <p>Tu correo ha sido validado correctamente. Ya puedes iniciar sesión en la plataforma.</p>
-      </div>
-    `);
+    if (!registro) {
+      res.status(400).json({ error: 'Codigo invalido. Solicite uno nuevo.' });
+      return;
+    }
+
+    const ahora = new Date();
+    const expiracion = new Date(registro.expiracion);
+
+    if (ahora > expiracion) {
+      res.status(400).json({ error: 'El codigo ha expirado. Solicite uno nuevo.' });
+      return;
+    }
+
+    await dbRun('BEGIN TRANSACTION;');
+
+    try {
+      await dbRun('UPDATE usuarios SET verificado = 1 WHERE id = ?', [usuario.id]);
+      await dbRun('UPDATE codigos_verificacion SET usado = 1 WHERE id = ?', [registro.id]);
+      await dbRun('COMMIT;');
+    } catch (transactionError) {
+      await dbRun('ROLLBACK;');
+      throw transactionError;
+    }
+
+    res.status(200).json({ message: 'Cuenta verificada con exito. Ya puedes iniciar sesion.' });
 
   } catch (error) {
-    console.error('❌ Error al verificar cuenta:', error);
-    res.status(500).json({ error: 'Error interno al procesar la verificación.' });
+    console.error('Error al verificar codigo:', error);
+    res.status(500).json({ error: 'Error interno al verificar el codigo.' });
   }
 };
-// 3. CONTROLADOR DE LOGIN CON SESIÓN OPACA (REEMPLAZO DE JWT)
-export const loginUsuario = async (req: Request, res: Response): Promise<void> => {
-  const { email, password } = req.body;
 
-  // Validaciones básicas de entrada
-  if (!email || !password) {
-    res.status(400).json({ error: 'El email y la contraseña son obligatorios.' });
+export const reenviarCodigo = async (req: Request, res: Response): Promise<void> => {
+  const { email } = req.body;
+
+  if (!email) {
+    res.status(400).json({ error: 'El email es obligatorio.' });
     return;
   }
 
   try {
-    // 1. Buscar al usuario en la base de datos
+    const usuario = await dbQueryGet('SELECT id, nombre FROM usuarios WHERE email = ?', [email]);
+
+    if (!usuario) {
+      res.status(404).json({ error: 'Usuario no encontrado.' });
+      return;
+    }
+
+    if (usuario.verificado === 1) {
+      res.status(400).json({ error: 'La cuenta ya esta verificada.' });
+      return;
+    }
+
+    const codigo = generarCodigo6Digitos();
+    const expiracion = new Date();
+    expiracion.setHours(expiracion.getHours() + 1);
+
+    await dbRun(
+      'INSERT INTO codigos_verificacion (email, codigo, expiracion, usado) VALUES (?, ?, ?, 0)',
+      [email, codigo, expiracion.toISOString()]
+    );
+
+    console.log('========================================');
+    console.log(`NUEVO CODIGO DE VERIFICACION para ${email}: ${codigo}`);
+    console.log('========================================');
+
+    await enviarCorreoVerificacion(email, usuario.nombre, codigo);
+
+    res.status(200).json({ message: 'Codigo reenviado a su correo.' });
+
+  } catch (error) {
+    console.error('Error al reenviar codigo:', error);
+    res.status(500).json({ error: 'Error interno.' });
+  }
+};
+
+export const loginUsuario = async (req: Request, res: Response): Promise<void> => {
+  const { email, password } = req.body;
+
+  if (!email || !password) {
+    res.status(400).json({ error: 'El email y la contrasena son obligatorios.' });
+    return;
+  }
+
+  try {
     const usuario = await dbQueryGet(
       'SELECT id, nombre, email, password_hash, verificado FROM usuarios WHERE email = ?',
       [email]
     );
 
     if (!usuario) {
-      res.status(401).json({ error: 'Credenciales inválidas.' });
+      res.status(401).json({ error: 'Credenciales invalidas.' });
       return;
     }
 
-    // 2. Verificar estrictamente que la cuenta esté validada por correo
     if (usuario.verificado === 0) {
-      res.status(403).json({ error: 'Por favor, verifique su correo electrónico antes de iniciar sesión.' });
+      res.status(403).json({ error: 'Por favor, verifique su correo electronico antes de iniciar sesion.' });
       return;
     }
 
-    // 3. Comparar las contraseñas con bcrypt
     const passwordCorrecto = await bcrypt.compare(password, usuario.password_hash);
     if (!passwordCorrecto) {
-      res.status(401).json({ error: 'Credenciales inválidas.' });
+      res.status(401).json({ error: 'Credenciales invalidas.' });
       return;
     }
 
-    // 4. Generar un Token de Sesión Único y Opaco (UUID v4)
     const tokenSesion = crypto.randomUUID();
 
-    // 5. Definir la expiración de la sesión (ejemplo: 24 horas a partir de ahora)
     const fechaExpiracion = new Date();
     fechaExpiracion.setHours(fechaExpiracion.getHours() + 24);
     const fechaExpiracionISO = fechaExpiracion.toISOString();
 
-    // 6. Guardar la sesión activa en la tabla de SQLite
     await dbRun(
       'INSERT INTO sesiones (id, usuario_id, fecha_expiracion) VALUES (?, ?, ?)',
       [tokenSesion, usuario.id, fechaExpiracionISO]
     );
 
-    // 7. Responder con el token de sesión y datos básicos del usuario
     res.status(200).json({
-      message: 'Inicio de sesión exitoso.',
-      token: tokenSesion, // Este token lo viajará el Frontend en los headers de las próximas peticiones
+      message: 'Inicio de sesion exitoso.',
+      token: tokenSesion,
       usuario: {
         id: usuario.id,
         nombre: usuario.nombre,
@@ -157,7 +227,100 @@ export const loginUsuario = async (req: Request, res: Response): Promise<void> =
     });
 
   } catch (error) {
-    console.error('❌ Error en el login de usuario:', error);
-    res.status(500).json({ error: 'Ocurrió un error interno en el servidor.' });
+    console.error('Error en el login de usuario:', error);
+    res.status(500).json({ error: 'Ocurrio un error interno en el servidor.' });
+  }
+};
+
+export const recuperarPassword = async (req: Request, res: Response): Promise<void> => {
+  const { email } = req.body;
+
+  if (!email) {
+    res.status(400).json({ error: 'El email es obligatorio.' });
+    return;
+  }
+
+  try {
+    const usuario = await dbQueryGet('SELECT id, nombre FROM usuarios WHERE email = ?', [email]);
+
+    if (!usuario) {
+      res.status(200).json({ message: 'Si el correo existe, recibiras un codigo de recuperacion.' });
+      return;
+    }
+
+    const codigo = generarCodigo6Digitos();
+    const expiracion = new Date();
+    expiracion.setHours(expiracion.getHours() + 1);
+
+    await dbRun(
+      'INSERT INTO codigos_verificacion (email, codigo, expiracion, usado) VALUES (?, ?, ?, 0)',
+      [email, codigo, expiracion.toISOString()]
+    );
+
+    console.log('========================================');
+    console.log(`CODIGO DE RECUPERACION para ${email}: ${codigo}`);
+    console.log('========================================');
+
+    await enviarCorreoRecuperacion(email, usuario.nombre, codigo);
+
+    res.status(200).json({ message: 'Correo de recuperacion enviado.' });
+
+  } catch (error) {
+    console.error('Error en recuperar contrasena:', error);
+    res.status(500).json({ error: 'Error interno al procesar la solicitud.' });
+  }
+};
+
+export const resetearPassword = async (req: Request, res: Response): Promise<void> => {
+  const { email, codigo, nueva_password } = req.body;
+
+  if (!email || !codigo || !nueva_password) {
+    res.status(400).json({ error: 'Email, codigo y nueva contrasena son obligatorios.' });
+    return;
+  }
+
+  if (nueva_password.length < 6) {
+    res.status(400).json({ error: 'La contrasena debe tener al menos 6 caracteres.' });
+    return;
+  }
+
+  try {
+    const registro = await dbQueryGet(
+      'SELECT id, expiracion FROM codigos_verificacion WHERE email = ? AND codigo = ? AND usado = 0 ORDER BY id DESC LIMIT 1',
+      [email, codigo]
+    );
+
+    if (!registro) {
+      res.status(400).json({ error: 'Codigo invalido o ya utilizado.' });
+      return;
+    }
+
+    const ahora = new Date();
+    const expiracion = new Date(registro.expiracion);
+
+    if (ahora > expiracion) {
+      res.status(400).json({ error: 'El codigo ha expirado. Solicita uno nuevo.' });
+      return;
+    }
+
+    const saltRounds = 10;
+    const passwordHash = await bcrypt.hash(nueva_password, saltRounds);
+
+    await dbRun('BEGIN TRANSACTION;');
+
+    try {
+      await dbRun('UPDATE usuarios SET password_hash = ? WHERE email = ?', [passwordHash, email]);
+      await dbRun('UPDATE codigos_verificacion SET usado = 1 WHERE id = ?', [registro.id]);
+      await dbRun('COMMIT;');
+    } catch (transactionError) {
+      await dbRun('ROLLBACK;');
+      throw transactionError;
+    }
+
+    res.status(200).json({ message: 'Contrasena actualizada con exito.' });
+
+  } catch (error) {
+    console.error('Error al resetear contrasena:', error);
+    res.status(500).json({ error: 'Error interno al procesar el cambio de contrasena.' });
   }
 };

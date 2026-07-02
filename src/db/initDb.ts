@@ -68,6 +68,48 @@ const inicializarTablas = async () => {
     `);
     console.log('✅ Tabla "sesiones" verificada/creada.');
 
+    // 4. Crear Tabla de Codigos de Verificacion
+    await ejecutarQuery(`
+      CREATE TABLE IF NOT EXISTS codigos_verificacion (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        email TEXT NOT NULL,
+        codigo TEXT NOT NULL,
+        expiracion TEXT NOT NULL,
+        usado INTEGER DEFAULT 0
+      );
+    `);
+    console.log('✅ Tabla "codigos_verificacion" verificada/creada.');
+
+    // 5. Crear Tabla de Operaciones Pendientes (transferencias, pagos)
+    await ejecutarQuery(`
+      CREATE TABLE IF NOT EXISTS operaciones_pendientes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        tipo TEXT NOT NULL CHECK(tipo IN ('transferencia', 'pago')),
+        email_usuario TEXT NOT NULL,
+        datos_json TEXT NOT NULL,
+        codigo TEXT NOT NULL,
+        expiracion TEXT NOT NULL,
+        confirmado INTEGER DEFAULT 0
+      );
+    `);
+    console.log('✅ Tabla "operaciones_pendientes" verificada/creada.');
+
+    // 6. Crear Tabla de Movimientos (historial de transacciones)
+    await ejecutarQuery(`
+      CREATE TABLE IF NOT EXISTS movimientos (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        usuario_id INTEGER NOT NULL,
+        tipo TEXT NOT NULL,
+        moneda TEXT NOT NULL CHECK(moneda IN ('ARS', 'USD')),
+        monto REAL NOT NULL,
+        saldo_resultante REAL NOT NULL,
+        descripcion TEXT,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (usuario_id) REFERENCES usuarios(id)
+      );
+    `);
+    console.log('✅ Tabla "movimientos" verificada/creada.');
+
     console.log('🚀 Base de datos inicializada con éxito.');
   } catch (error) {
     console.error('❌ Error construyendo las tablas:', error);
