@@ -3,6 +3,7 @@ import dotenv from 'dotenv';
 import authRoutes from './routes/auth.routes.js';
 import cuentaRoutes from './routes/cuenta.routes.js';
 import internoRoutes from './routes/interno.routes.js';
+import inicializarTablas from './db/initDb.js';
 
 dotenv.config();
 
@@ -19,6 +20,8 @@ app.get('/health', (req, res) => {
   res.json({ status: 'Backend online', timestamp: new Date() });
 });
 
-app.listen(PORT, () => {
-  console.log(`Backend corriendo en http://localhost:${PORT}`);
+inicializarTablas().then(() => {
+  app.listen(PORT, () => {
+    console.log(`Backend corriendo en http://localhost:${PORT}`);
+  });
 });

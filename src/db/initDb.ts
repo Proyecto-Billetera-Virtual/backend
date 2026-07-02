@@ -1,40 +1,10 @@
-import sqlite3 from 'sqlite3';
-import dotenv from 'dotenv';
-import path from 'path';
-
-dotenv.config();
-
-// Obtener la ruta de la base de datos desde el .env o usar una por defecto
-const dbPath = process.env.DB_PATH || './database.sqlite';
-const absolutePath = path.resolve(dbPath);
-
-console.log(`⏳ Inicializando base de datos en: ${absolutePath}...`);
-
-// Conectar con la base de datos (si el archivo no existe, SQLite lo crea automáticamente)
-const db = new sqlite3.Database(absolutePath, (err) => {
-  if (err) {
-    console.error('❌ Error al abrir la base de datos:', err.message);
-    process.exit(1);
-  }
-});
-
-// Función auxiliar para ejecutar queries usando Promesas de manera limpia
-const ejecutarQuery = (sql: string): Promise<void> => {
-  return new Promise((resolve, reject) => {
-    db.run(sql, (err) => {
-      if (err) reject(err);
-      else resolve();
-    });
-  });
-};
+import { db, dbRun } from './connection.js';
 
 const inicializarTablas = async () => {
   try {
-    // Activar soporte para Claves Foráneas (Foreign Keys) en SQLite de forma explícita
-    await ejecutarQuery('PRAGMA foreign_keys = ON;');
+    await dbRun('PRAGMA foreign_keys = ON;');
 
-    // 1. Crear Tabla de Usuarios
-    await ejecutarQuery(`
+    await dbRun(`
       CREATE TABLE IF NOT EXISTS usuarios (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         nombre TEXT NOT NULL,
@@ -43,10 +13,9 @@ const inicializarTablas = async () => {
         verificado INTEGER DEFAULT 0
       );
     `);
-    console.log('✅ Tabla "usuarios" verificada/creada.');
+    console.log('Tabla "usuarios" verificada/creada.');
 
-    // 2. Crear Tabla de Cuentas (Pesos y Dólares)
-    await ejecutarQuery(`
+    await dbRun(`
       CREATE TABLE IF NOT EXISTS cuentas (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         usuario_id INTEGER NOT NULL,
@@ -55,10 +24,9 @@ const inicializarTablas = async () => {
         FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE CASCADE
       );
     `);
-    console.log('✅ Tabla "cuentas" verificada/creada.');
+    console.log('Tabla "cuentas" verificada/creada.');
 
-    // 3. Crear Tabla de Sesiones Opacas (Control de accesos alternativo a JWT)
-    await ejecutarQuery(`
+    await dbRun(`
       CREATE TABLE IF NOT EXISTS sesiones (
         id TEXT PRIMARY KEY,
         usuario_id INTEGER NOT NULL,
@@ -66,10 +34,9 @@ const inicializarTablas = async () => {
         FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE CASCADE
       );
     `);
-    console.log('✅ Tabla "sesiones" verificada/creada.');
+    console.log('Tabla "sesiones" verificada/creada.');
 
-    // 4. Crear Tabla de Codigos de Verificacion
-    await ejecutarQuery(`
+    await dbRun(`
       CREATE TABLE IF NOT EXISTS codigos_verificacion (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         email TEXT NOT NULL,
@@ -78,10 +45,9 @@ const inicializarTablas = async () => {
         usado INTEGER DEFAULT 0
       );
     `);
-    console.log('✅ Tabla "codigos_verificacion" verificada/creada.');
+    console.log('Tabla "codigos_verificacion" verificada/creada.');
 
-    // 5. Crear Tabla de Operaciones Pendientes (transferencias, pagos)
-    await ejecutarQuery(`
+    await dbRun(`
       CREATE TABLE IF NOT EXISTS operaciones_pendientes (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         tipo TEXT NOT NULL CHECK(tipo IN ('transferencia', 'pago')),
@@ -92,10 +58,9 @@ const inicializarTablas = async () => {
         confirmado INTEGER DEFAULT 0
       );
     `);
-    console.log('✅ Tabla "operaciones_pendientes" verificada/creada.');
+    console.log('Tabla "operaciones_pendientes" verificada/creada.');
 
-    // 6. Crear Tabla de Movimientos (historial de transacciones)
-    await ejecutarQuery(`
+    await dbRun(`
       CREATE TABLE IF NOT EXISTS movimientos (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         usuario_id INTEGER NOT NULL,
@@ -108,15 +73,13 @@ const inicializarTablas = async () => {
         FOREIGN KEY (usuario_id) REFERENCES usuarios(id)
       );
     `);
-    console.log('✅ Tabla "movimientos" verificada/creada.');
+    console.log('Tabla "movimientos" verificada/creada.');
 
-    console.log('🚀 Base de datos inicializada con éxito.');
+    console.log('Base de datos inicializada con exito.');
   } catch (error) {
-    console.error('❌ Error construyendo las tablas:', error);
-  } finally {
-    // Cerrar la conexión al terminar el script
-    db.close();
+    console.error('Error construyendo las tablas:', error);
+    throw error;
   }
 };
 
-inicializarTablas();
+export default inicializarTablas;
