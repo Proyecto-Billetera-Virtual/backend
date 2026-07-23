@@ -4,8 +4,6 @@ node_modules/
 # Código compilado
 dist/
 
-# Variables de entorno con datos reales
-.env
 
 # Archivo local de la Base de Datos SQLite 
 *.sqlite

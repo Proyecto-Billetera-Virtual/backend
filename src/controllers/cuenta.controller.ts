@@ -45,6 +45,11 @@ export const ingresarFondos = async (req: Request, res: Response): Promise<void>
   const usuarioId = req.usuarioId;
   const { moneda, monto } = req.body;
 
+  if (usuarioId === undefined) {
+    res.status(401).json({ error: 'No autenticado.' });
+    return;
+  }
+
   if (!moneda || monto === undefined) {
     res.status(400).json({ error: 'La moneda (ARS/USD) y el monto son obligatorios.' });
     return;
