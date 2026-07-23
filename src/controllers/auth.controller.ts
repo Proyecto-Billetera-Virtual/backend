@@ -26,47 +26,44 @@ export const registrarUsuario = async (req: Request, res: Response): Promise<voi
     const saltRounds = 10;
     const passwordHash = await bcrypt.hash(password, saltRounds);
 
+    let nuevoUsuarioId = 0;
     await dbRun('BEGIN TRANSACTION;');
-
     try {
       const resultadoUsuario = await dbRun(
         'INSERT INTO usuarios (nombre, email, password_hash, verificado) VALUES (?, ?, ?, 0)',
         [nombre, email, passwordHash]
       );
-
-      const nuevoUsuarioId = resultadoUsuario.lastID;
-
+      nuevoUsuarioId = resultadoUsuario.lastID;
       await dbRun('INSERT INTO cuentas (usuario_id, moneda, saldo) VALUES (?, "ARS", 0.0)', [nuevoUsuarioId]);
       await dbRun('INSERT INTO cuentas (usuario_id, moneda, saldo) VALUES (?, "USD", 0.0)', [nuevoUsuarioId]);
-
       await dbRun('COMMIT;');
-
-      const codigo = generarCodigo6Digitos();
-      const expiracion = new Date();
-      expiracion.setHours(expiracion.getHours() + 1);
-
-      await dbRun(
-        'INSERT INTO codigos_verificacion (email, codigo, expiracion, usado) VALUES (?, ?, ?, 0)',
-        [email, codigo, expiracion.toISOString()]
-      );
-
-      console.log('========================================');
-      console.log(`CODIGO DE VERIFICACION para ${email}: ${codigo}`);
-      console.log('========================================');
-
-      await enviarCorreoVerificacion(email, nombre, codigo);
-
-      res.status(201).json({
-        message: 'Usuario registrado con exito. Se ha enviado un codigo de verificacion a su correo.',
-        usuarioId: nuevoUsuarioId,
-        email: email
-      });
-
     } catch (transactionError) {
-      await dbRun('ROLLBACK;');
-      throw transactionError;
+      try { await dbRun('ROLLBACK;'); } catch { /* ignorar */ }
+      console.error('Error en transacción de registro:', transactionError);
+      res.status(500).json({ error: 'Ocurrio un error interno en el servidor.' });
+      return;
     }
 
+    const codigo = generarCodigo6Digitos();
+    const expiracion = new Date();
+    expiracion.setHours(expiracion.getHours() + 1);
+    await dbRun(
+      'INSERT INTO codigos_verificacion (email, codigo, expiracion, usado) VALUES (?, ?, ?, 0)',
+      [email, codigo, expiracion.toISOString()]
+    );
+    console.log('========================================');
+    console.log(`CODIGO DE VERIFICACION para ${email}: ${codigo}`);
+    console.log('========================================');
+    try {
+      await enviarCorreoVerificacion(email, nombre, codigo);
+    } catch (emailError) {
+      console.error('Error al enviar email (no crítico):', emailError instanceof Error ? emailError.message : emailError);
+    }
+    res.status(201).json({
+      message: 'Usuario registrado con exito. Se ha enviado un codigo de verificacion a su correo.',
+      usuarioId: nuevoUsuarioId,
+      email: email
+    });
   } catch (error) {
     console.error('Error en el registro de usuario:', error);
     res.status(500).json({ error: 'Ocurrio un error interno en el servidor.' });
