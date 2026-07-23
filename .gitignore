@@ -5,6 +5,9 @@ node_modules/
 dist/
 
 
+# Archivos de entorno (contienen credenciales)
+.env
+
 # Archivo local de la Base de Datos SQLite 
 *.sqlite
 *.sqlite-journal

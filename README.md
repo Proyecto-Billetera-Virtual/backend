@@ -1,25 +1,44 @@
 # Backend
 
+## Requisitos
+
+- **Docker** y **Docker Compose** instalados.
+
+### Instalar Docker
+
+| Sistema | Comando / instrucción |
+|---|---|
+| **Linux (Debian/Ubuntu)** | `sudo apt install docker.io docker-compose-v2 && sudo systemctl enable --now docker` |
+| **Linux (Arch)** | `sudo pacman -S docker docker-compose` |
+| **macOS** | Descargar e instalar [Docker Desktop](https://www.docker.com/products/docker-desktop/) |
+| **Windows** | Descargar e instalar [Docker Desktop](https://www.docker.com/products/docker-desktop/) |
+
+Verificar con `docker --version`.
+
 ## Docker
 
-### Construir la imagen
+### Construir
 ```bash
 docker build -t billetera-backend .
 ```
 
-### Ejecutar en una PC de la LAN
+### Ejecutar
 ```bash
 docker rm -f backend 2>/dev/null
 docker run -d --name backend \
   -v backend-data:/app/data \
   -e DB_PATH=/app/data/database.sqlite \
-  -e SMTP_USER=tu_email@gmail.com \
-  -e SMTP_PASS=tu_contraseña \
+  -e SMTP_HOST=smtp.gmail.com \
+  -e SMTP_PORT=587 \
+  -e "SMTP_USER=TU_EMAIL" \
+  -e "SMTP_PASS=TU_PASSWORD" \
   -p 5000:5000 \
   billetera-backend
 ```
 
-Esta PC debe ser accesible desde las otras en `http://<IP_DEL_BACKEND>:5000`.
+Reemplazar `TU_EMAIL` y `TU_PASSWORD` por credenciales SMTP reales. Crear un archivo `.env` a partir de `.env.example` para no exponer datos sensibles.
+
+Para probar todo local, usá `./start.sh` en la raíz del proyecto.
 
 ### Variables de entorno
 | Variable | Descripción | Default |
@@ -28,5 +47,5 @@ Esta PC debe ser accesible desde las otras en `http://<IP_DEL_BACKEND>:5000`.
 | `DB_PATH` | Ruta a la base SQLite | `/app/data/database.sqlite` |
 | `SMTP_HOST` | Servidor SMTP | `smtp.gmail.com` |
 | `SMTP_PORT` | Puerto SMTP | `587` |
-| `SMTP_USER` | Usuario SMTP | `billeteravirtu@gmail.com` |
-| `SMTP_PASS` | Contraseña SMTP | `okisutfkaqjnuuni` |
+| `SMTP_USER` | Usuario SMTP | *(obligatorio)* |
+| `SMTP_PASS` | Contraseña SMTP | *(obligatorio)* |
